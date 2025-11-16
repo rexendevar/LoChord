@@ -47,7 +47,7 @@ Any chord button + main button cycles between inversions.
 # To do
 VERY VERY early version here. Still want to do
 - more versatile strum mode so u can do ska & other better music
-- strum weighting where low strings play louder on upstroke or something
+- strum weighting where low strings play louder on upstroke or something DONE
 - refine the joystick cause some of the chords are wrong for sure
 - lead mode
 - configurable larger chords e.g. 2 octaves of a triad stacked, bass note etc
