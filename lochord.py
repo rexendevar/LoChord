@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-from evdev import InputDevice, list_devices, categorize, ecodes
+from evdev import InputDevice, list_devices, categorize, ecodes, ff
 import rtmidi
 import math
 import numpy as np
@@ -37,12 +37,17 @@ MAIN_SCALE = "maj"
 OFFSET = 0
 CURRENT_CHORD = "main"
 STRUM_MODE = False
+STRUM_MODE_EVIL = False # when True you can release chord button without stopping notes. to stop notes you have to move the right stick vertically
 
 STRUM_CLOCK = 0
 STRUM_POS = 0
 CHORD_TO_STRUM = []
+STRUM_WEIGHT = -0.25 # biases velocity towards notes at one end of the strum
 
-CHORD_NAMES_CIRCLE = ["sus2", "dim", "aug", "maj/min", "7", "maj/min7", "maj/min9", "sus4"]
+CHORD_NAMES_CIRCLE = ["maj/min", "7", "maj/min7", "maj/min9", "sus4", "sus2", "dim", "aug"]
+# clockwise from the top
+# you can swap these out! (coming soon)
+# default is ["maj/min", "7", "maj/min7", "maj/min9", "sus4", "sus2", "dim", "aug"]
 
 
 JOYSTICK = [ 0, 0 ]
@@ -51,6 +56,7 @@ JOYSTICK = [ 0, 0 ]
 PRESSED_KEYS = set()
 
 CURRENTLY_PRESSED = {}
+TO_STOP = set()
 
 CHANGES = { # [ octave shift, inversion ]
     "BTN_A":     [0,0],
@@ -158,14 +164,22 @@ def generate_scale(key: str = CURRENT_CHORD) -> None: # defines the chords playe
                 60 + OFFSET + get_step(step  , MAIN_SCALE) + 4,
                 60 + OFFSET + get_step(step  , MAIN_SCALE) + 8,
             ]
+    elif key == "minimal9":
+        for step, chord in enumerate(CHORDS):
+            CHORDS[chord] = [
+                60 + OFFSET + get_step(step  , MAIN_SCALE),
+                60 + OFFSET + 12 + get_step(step+2, MAIN_SCALE)
+            ]
 
     for key in CHORDS:
+        # octave
         temp = []
         for note in CHORDS[key]:
             note += 12 * CHANGES[key][0]
             temp.append(note)
         CHORDS[key] = temp
 
+        # inversions
         if CHANGES[key][1] >= 1:
             CHORDS[key][0] += 12
         if CHANGES[key][1] == 2:
@@ -175,6 +189,16 @@ def generate_scale(key: str = CURRENT_CHORD) -> None: # defines the chords playe
 
         if len(CHORDS[key]) != len(set(CHORDS[key])):
             CHORDS[key][-1] += 12
+
+        # # stacked octaves
+        # temp = []
+        # for note in CHORDS[key]:
+        #     temp.append(note+12)
+        # for note in temp:
+        #     if not note in CHORDS[key]:
+        #         CHORDS[key].append(note)
+        # CHORDS[key].sort()
+
 
     change_on_the_fly()
 
@@ -224,7 +248,7 @@ def interpret_joystick() -> None:
     if math.sqrt(JOYSTICK[0]**2 + JOYSTICK[1]**2) < 0.5:
         chord = "main"
     else:
-        ang = np.arctan2(JOYSTICK[0], JOYSTICK[1]) / math.pi * 4 + 3.875
+        ang = np.arctan2(JOYSTICK[0], JOYSTICK[1]) / math.pi * 4 + 0.875
         ang = int(ang//1)
         chord = CHORD_NAMES_CIRCLE[ang]
     global CURRENT_CHORD
@@ -242,6 +266,7 @@ def register( note: int, source: str) -> None: # keep track of which notes are b
         CURRENTLY_PRESSED[note].append(source)
     PRESSED_KEYS.add(source)
 
+
 def try_release( note: int, source: str | None = None) -> bool: # can we release this note or is something else also playing it?
     try:
         PRESSED_KEYS.remove(source)
@@ -257,29 +282,95 @@ def try_release( note: int, source: str | None = None) -> bool: # can we release
             return False
     else:
         return True
+    # i also hate this logic.
 
 
 
-def try_strum( pressure: int ) -> None:
-    global STRUM_POS, STRUM_CLOCK
+
+def play_key( key: str ) -> None:
+    global CHORD_TO_STRUM
+    chord = CHORDS[key]
+    if not STRUM_MODE:
+        for note in chord:
+            register(note, key)
+            midi_out.send_message([0x90 | CHANNEL, note, VELOCITY])
+    else:
+        for note in chord:
+            register(note, key)
+            if not note in CHORD_TO_STRUM:
+                CHORD_TO_STRUM.append(note)
+        CHORD_TO_STRUM.sort()
+
+def release_key( key: str ) -> None:
+    global CHORD_TO_STRUM, TO_STOP
+    chord = CHORDS[key]
+    for note in chord:
+        if try_release(note, key):
+            l = []
+            if note in CHORD_TO_STRUM:
+                l.append(note)
+            for note in l:
+                CHORD_TO_STRUM.remove(note)
+            if not (STRUM_MODE and STRUM_MODE_EVIL):
+                midi_out.send_message([0x80 | CHANNEL, note, 0])
+            else:
+                if not note in TO_STOP:
+                    TO_STOP.add(note)
+
+
+RUMBLE = 0
+
+def try_strum( pressure: int, device: InputDevice ) -> None:
+    global STRUM_POS, STRUM_CLOCK, RUMBLE
     sep = 1020 // (len(CHORD_TO_STRUM)+2) # make sure every note actually gets played
     positions = [10]
     for i, note in enumerate(CHORD_TO_STRUM):
         positions.append( sep*(1+i) )
     positions.append( sep*(1+len(CHORD_TO_STRUM)) )
+    if STRUM_POS < pressure: # if trigger is pushing IN this frame:
+        vel_modifier = 1+ STRUM_WEIGHT
+    else:
+        vel_modifier = 1- STRUM_WEIGHT
+
+    # step /512 **(1+vel_modifier) * 127-> vel
     # strum clock and strum pos
     for i, step in enumerate(positions):
-        if STRUM_POS <= step <= pressure or pressure <= step <= STRUM_POS:
+        if STRUM_POS <= step <= pressure or pressure <= step <= STRUM_POS: # if trigger just passed over a strummable note
             if i == 0 or i == len(positions)-1:
-                STRUM_CLOCK = time.monotonic()
+                STRUM_CLOCK = time.monotonic_ns()
             else:
-                elapsed = time.monotonic() - STRUM_CLOCK
-                vel = int(min( 127 / (100* elapsed), 127))
+                if RUMBLE != 0:
+                    device.erase_effect(RUMBLE)
+                step = step/1024 * 5
+                elapsed = time.monotonic_ns() - STRUM_CLOCK
+                elapsed *= len(CHORD_TO_STRUM)
+                # increase divisor to bias louder
+                vel = int(min( 127 / (elapsed / 30000000 ), 127)) # standard velocity
+                vel *= (1 / vel_modifier**(step)) # new equation
+                vel = int(min(vel, 127))
                 midi_out.send_message([0x90 | CHANNEL, CHORD_TO_STRUM[i-1], vel])
-                STRUM_CLOCK = time.monotonic()
+                RUMBLE = rumble(device, vel)
+                STRUM_CLOCK = time.monotonic_ns()
     STRUM_POS = pressure
 
 
+def rumble( device: InputDevice, strength: int ):
+    rumble = ff.Rumble(strong_magnitude=0x0F00, weak_magnitude=(128+strength*384))
+    effect_type = ff.EffectType(ff_rumble_effect=rumble)
+    duration_ms = 100
+
+    effect = ff.Effect(
+        ecodes.FF_RUMBLE, -1, 0,
+        ff.Trigger(0, 0),
+        ff.Replay(duration_ms, 0),
+        effect_type
+    )
+    repeat_count = 1
+    effect_id = device.upload_effect(effect)
+    device.write(ecodes.EV_FF, effect_id, repeat_count)
+    return effect_id
+
+#1000000000
 
 def blame():
     pass # when notes are played, check the charts to see which keys played them
@@ -315,6 +406,8 @@ def load( slot: str ) -> None:
     generate_scale()
 
 
+
+
 def main():
 
     # -------------------------------
@@ -346,7 +439,7 @@ def main():
     generate_scale()
     print("Listening for gamepad button presses...")
 
-    global VELOCITY, OFFSET, MAIN_SCALE, CURRENT_CHORD, CHANGES, STRUM_MODE, ABS_TRIGGERS, CHORD_TO_STRUM
+    global VELOCITY, OFFSET, MAIN_SCALE, CURRENT_CHORD, CHANGES, STRUM_MODE, ABS_TRIGGERS, CHORD_TO_STRUM, TO_STOP, STRUM_MODE_EVIL
     main_button_held = False
     save_button_held = False
     load_button_held = False
@@ -391,27 +484,10 @@ def main():
                     elif save_button_held and key.keystate == key.key_down:
                         save(button)
                     else:
-                        chord = CHORDS[button]
                         if key.keystate == key.key_down:
-                            if not STRUM_MODE:
-                                for note in chord:
-                                    register(note, button)
-                                    midi_out.send_message([0x90 | CHANNEL, note, VELOCITY])
-                            else:
-                                for note in chord:
-                                    register(note, button)
-                                    if not note in CHORD_TO_STRUM:
-                                        CHORD_TO_STRUM.append(note)
-                                CHORD_TO_STRUM.sort()
+                            play_key(button)
                         elif key.keystate == key.key_up:
-                            for note in chord:
-                                if try_release(note, button):
-                                    l = []
-                                    if note in CHORD_TO_STRUM:
-                                        l.append(note)
-                                    for note in l:
-                                        CHORD_TO_STRUM.remove(note)
-                                    midi_out.send_message([0x80 | CHANNEL, note, 0])
+                            release_key(button)
 
             elif event.type == ecodes.EV_ABS:
                 code = ecodes.ABS[event.code] if event.code in ecodes.ABS else None
@@ -427,10 +503,17 @@ def main():
                             CHORD_TO_STRUM = []
                         elif active and value <= threshold:
                             ABS_TRIGGERS[code][2] = False
+                    elif save_button_held:
+                        if not active and value > threshold:
+                            STRUM_MODE_EVIL = not STRUM_MODE_EVIL
+                            print("Free strum mode is ON" if STRUM_MODE_EVIL else "Free strum mode is OFF")
+                            ABS_TRIGGERS[code][2] = True
+                        elif active and value <= threshold:
+                            ABS_TRIGGERS[code][2] = False
                     elif not STRUM_MODE:
                         VELOCITY = int( 127 - event.value/8 )
                     else:
-                        try_strum(event.value)
+                        try_strum(event.value, device)
 
                 elif code in ABS_TRIGGERS: # the 7th scale degree is played by the left trigger
                     note, threshold, active = ABS_TRIGGERS[code]
@@ -439,31 +522,13 @@ def main():
                         if save_button_held:
                             save(code)
                         else:
-                            chord = CHORDS[code]
                             if not active and value > threshold:
                                 # Trigger note-on
-                                if not STRUM_MODE:
-                                    for note in chord:
-                                        register(note, code)
-                                        midi_out.send_message([0x90 | CHANNEL, note, VELOCITY])
-                                else:
-                                    for note in chord:
-                                        register(note, code)
-                                        if not note in CHORD_TO_STRUM:
-                                            CHORD_TO_STRUM.append(note)
-                                    CHORD_TO_STRUM.sort()
+                                play_key(code)
                                 ABS_TRIGGERS[code][2] = True  # mark active
-
                             elif active and value <= threshold:
                                 # Trigger note-off
-                                for note in chord:
-                                    if try_release(note, code):
-                                        l = []
-                                        if note in CHORD_TO_STRUM:
-                                            l.append(note)
-                                        for note in l:
-                                            CHORD_TO_STRUM.remove(note)
-                                        midi_out.send_message([0x80 | CHANNEL, note, 0])
+                                release_key(code)
                                 ABS_TRIGGERS[code][2] = False
 
 
@@ -491,6 +556,11 @@ def main():
                     else:
                         OFFSET -= 12* event.value # global octave
                     generate_scale()
+
+                elif code == "ABS_RY":
+                    for note in TO_STOP:
+                        midi_out.send_message([0x80 | CHANNEL, note, 0])
+                    TO_STOP.clear()
 
 
     except KeyboardInterrupt:
