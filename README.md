@@ -13,6 +13,8 @@ Each scale degree button will play its respective chord, from I to vii in the Na
 # Setup
 Currently this is only built for Linux. I think you need kernel module `uinput` plus you need your user to be in the input group which requires sudo. After that, run `evtest` and check your controller's output to see what your buttons are called, because you'll probably have to rename all of them in the CHORDS section of the script. Also make sure the controller name is right.
 
+Make sure u have Python modules `evdev` and `rtmidi` and make sure it's the RIGHT rtmidi because apparently there's more than one. The rest should already be installed if u have Python.
+
 Once it's configured, running the script will create a MIDI node in your audio system, which you'll likely need to manually connect to your DAW using a patchbay program such as Helvum. After that it's connected and should work.
 
 ## Joystick
