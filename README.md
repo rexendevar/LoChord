@@ -52,6 +52,8 @@ VERY VERY early version here. Still want to do
 - lead mode
 - configurable larger chords e.g. 2 octaves of a triad stacked, bass note etc
 - rewrite it all with a class so i'm not misusing global vars so badly
+- windows version
+- put it in a ras pi for my dawless setup
 - ill think of more
 
 # demo
