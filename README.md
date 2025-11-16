@@ -1,12 +1,12 @@
 # Intro
 This is a VERY EARLY WORK IN PROGRESS tool for transforming controller inputs into MIDI chords on Linux, very similar to the functionality of the HiChord. The basic controls are: 
 
-A X Y B Rb Lb Lt - scale degrees (in order)
-Left stick - modify chord (the diagram is the same as on the HiChord)
-Right trigger - velocity control and strum
-Select, start - save, load
-D-pad - octave and key control
-Central button - wildcard
+- A X Y B Rb Lb Lt - scale degrees (in order)
+- Left stick - modify chord (the diagram is the same as on the HiChord)
+- Right trigger - velocity control and strum
+- Select, start - save, load
+- D-pad - octave and key control
+- Central button - wildcard
 
 Each scale degree button will play its respective chord, from I to vii in the Nashville numbering system. LoChord starts in C Major by default.
 
