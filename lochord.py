@@ -19,12 +19,13 @@ CHORDS = {
 }
 
 ABS_TRIGGERS = {
-    "ABS_Z": [70, 100, False],
+    "ABS_Z": [70, 10, False],
     "ABS_RZ": [70, 100, False],
 }
 
 VELOCITY = 127
 CHANNEL = 0  # MIDI channel 1
+RECORDING_MODE = False # send note offs before note ons in strum mode?
 
 
 # semitone patterns
@@ -36,6 +37,7 @@ MINOR_TALLY = []
 MAIN_SCALE = "maj"
 OFFSET = 0
 CURRENT_CHORD = "main"
+MAIN_CHORD = "main"
 STRUM_MODE = False
 STRUM_MODE_EVIL = False # when True you can release chord button without stopping notes. to stop notes you have to move the right stick vertically
 
@@ -96,6 +98,9 @@ def get_step(step: int=0, key: str="maj") -> int:
 
 
 def generate_scale(key: str = CURRENT_CHORD) -> None: # defines the chords played by each key
+
+    if key == "main":
+        key = MAIN_CHORD
 
     if key == "main":
         key = MAIN_SCALE
@@ -246,7 +251,7 @@ def change_on_the_fly() -> None: # change currently playing notes when joystick 
 
 def interpret_joystick() -> None:
     if math.sqrt(JOYSTICK[0]**2 + JOYSTICK[1]**2) < 0.5:
-        chord = "main"
+        chord = MAIN_CHORD
     else:
         ang = np.arctan2(JOYSTICK[0], JOYSTICK[1]) / math.pi * 4 + 0.875
         ang = int(ang//1)
@@ -348,6 +353,8 @@ def try_strum( pressure: int, device: InputDevice ) -> None:
                 vel = int(min( 127 / (elapsed / 30000000 ), 127)) # standard velocity
                 vel *= (1 / vel_modifier**(step)) # new equation
                 vel = int(min(vel, 127))
+                if RECORDING_MODE:
+                    midi_out.send_message([0x80 | CHANNEL, CHORD_TO_STRUM[i-1], 0])
                 midi_out.send_message([0x90 | CHANNEL, CHORD_TO_STRUM[i-1], vel])
                 RUMBLE = rumble(device, vel)
                 STRUM_CLOCK = time.monotonic_ns()
