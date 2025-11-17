@@ -39,7 +39,7 @@ OFFSET = 0
 CURRENT_CHORD = "main"
 MAIN_CHORD = "main"
 STRUM_MODE = False
-STRUM_MODE_EVIL = False # when True you can release chord button without stopping notes. to stop notes you have to move the right stick vertically
+STRUM_FOCUS: list[str] = ["", ""]
 
 STRUM_CLOCK = 0
 STRUM_POS = 0
@@ -272,7 +272,8 @@ def register( note: int, source: str) -> None: # keep track of which notes are b
     PRESSED_KEYS.add(source)
 
 
-def try_release( note: int, source: str | None = None) -> bool: # can we release this note or is something else also playing it?
+
+def try_release( note: int, source: str | None = None ) -> bool: # can we release this note or is something else also playing it?
     try:
         PRESSED_KEYS.remove(source)
     except:
@@ -293,13 +294,27 @@ def try_release( note: int, source: str | None = None) -> bool: # can we release
 
 
 def play_key( key: str ) -> None:
-    global CHORD_TO_STRUM
+    global CHORD_TO_STRUM, STRUM_FOCUS
+    # current problem releasing focused key doesnt stop it from playing
     chord = CHORDS[key]
     if not STRUM_MODE:
         for note in chord:
             register(note, key)
             midi_out.send_message([0x90 | CHANNEL, note, VELOCITY])
     else:
+        # note off only when next chord is pressed (AND current note released?)
+        # but this is next chord
+        if key != STRUM_FOCUS[0]:
+            pass
+            # 0 is currently pressed 1 is previous
+            # note off double prev chord (this doesn't work like this guaranteed)
+            release_key(STRUM_FOCUS[1])
+            # register new chord as current chord
+            STRUM_FOCUS[1] = STRUM_FOCUS[0]
+            STRUM_FOCUS[0] = key
+            # and release prev chord if it's released
+            if STRUM_FOCUS[1] not in PRESSED_KEYS:
+                release_key(STRUM_FOCUS[1])
         for note in chord:
             register(note, key)
             if not note in CHORD_TO_STRUM:
@@ -308,7 +323,10 @@ def play_key( key: str ) -> None:
 
 def release_key( key: str ) -> None:
     global CHORD_TO_STRUM, TO_STOP
-    chord = CHORDS[key]
+    try:
+        chord = CHORDS[key]
+    except KeyError:
+        return
     for note in chord:
         if try_release(note, key):
             l = []
@@ -316,11 +334,8 @@ def release_key( key: str ) -> None:
                 l.append(note)
             for note in l:
                 CHORD_TO_STRUM.remove(note)
-            if not (STRUM_MODE and STRUM_MODE_EVIL):
+            if (key == STRUM_FOCUS[1] or not STRUM_MODE):
                 midi_out.send_message([0x80 | CHANNEL, note, 0])
-            else:
-                if not note in TO_STOP:
-                    TO_STOP.add(note)
 
 
 RUMBLE = 0
@@ -350,8 +365,8 @@ def try_strum( pressure: int, device: InputDevice ) -> None:
                 elapsed = time.monotonic_ns() - STRUM_CLOCK
                 elapsed *= len(CHORD_TO_STRUM)
                 # increase divisor to bias louder
-                vel = int(min( 127 / (elapsed / 30000000 ), 127)) # standard velocity
-                vel *= (1 / vel_modifier**(step)) # new equation
+                vel = int(min( 127 / (elapsed / 30000000 ), 127)) # determine velocity by time between notes
+                vel *= (1 / vel_modifier**(step)) # weigh the strum
                 vel = int(min(vel, 127))
                 if RECORDING_MODE:
                     midi_out.send_message([0x80 | CHANNEL, CHORD_TO_STRUM[i-1], 0])
@@ -376,8 +391,6 @@ def rumble( device: InputDevice, strength: int ):
     effect_id = device.upload_effect(effect)
     device.write(ecodes.EV_FF, effect_id, repeat_count)
     return effect_id
-
-#1000000000
 
 def blame():
     pass # when notes are played, check the charts to see which keys played them
@@ -446,7 +459,7 @@ def main():
     generate_scale()
     print("Listening for gamepad button presses...")
 
-    global VELOCITY, OFFSET, MAIN_SCALE, CURRENT_CHORD, CHANGES, STRUM_MODE, ABS_TRIGGERS, CHORD_TO_STRUM, TO_STOP, STRUM_MODE_EVIL
+    global VELOCITY, OFFSET, MAIN_SCALE, CURRENT_CHORD, CHANGES, STRUM_MODE, ABS_TRIGGERS, CHORD_TO_STRUM, TO_STOP
     main_button_held = False
     save_button_held = False
     load_button_held = False
@@ -508,13 +521,6 @@ def main():
                             print("Strum mode is ON" if STRUM_MODE else "Strum mode is OFF")
                             ABS_TRIGGERS[code][2] = True
                             CHORD_TO_STRUM = []
-                        elif active and value <= threshold:
-                            ABS_TRIGGERS[code][2] = False
-                    elif save_button_held:
-                        if not active and value > threshold:
-                            STRUM_MODE_EVIL = not STRUM_MODE_EVIL
-                            print("Free strum mode is ON" if STRUM_MODE_EVIL else "Free strum mode is OFF")
-                            ABS_TRIGGERS[code][2] = True
                         elif active and value <= threshold:
                             ABS_TRIGGERS[code][2] = False
                     elif not STRUM_MODE:
