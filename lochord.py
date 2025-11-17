@@ -17,7 +17,7 @@ STRUM_WEIGHT = -0.25 # biases velocity towards notes at one end of the strum
 DEADZONE = 0.5 # how far from center does the stick have to move to change chords
 
 DO_RUMBLE = True
-GUITAR_MODE = False # stacks more notes for each chord. very nice (option not working yet)
+GUITAR_MODE = True # stacks more notes for each chord. very nice
 
 
 
@@ -131,9 +131,10 @@ class LoChord:
                     60 + self.offset + self.get_step(step  , key),
                     60 + self.offset + self.get_step(step+2, key),
                     60 + self.offset + self.get_step(step+4, key),
-                    # 60 + self.offset + self.get_step(step  , key) + 12,
-                    # 60 + self.offset + self.get_step(step+2, key) + 12
                 ]
+                if GUITAR_MODE:
+                    self.chords[chord].append(60 + self.offset + self.get_step(step  , key) + 12)
+                    self.chords[chord].append(60 + self.offset + self.get_step(step+2, key) + 12)
         elif key == "7": # check this
             for step, chord in enumerate(self.chords):
                 start = self.get_step(step, self.main_scale)
@@ -141,8 +142,12 @@ class LoChord:
                     60 + self.offset + start,
                     60 + self.offset + start + 4,
                     60 + self.offset + start + 7,
-                    60 + self.offset + start + 10
+                    60 + self.offset + start + 10,
                 ]
+                if GUITAR_MODE:
+                    self.chords[chord].append(60 + self.offset + start + 12)
+                    #self.chords[chord].append(60 + self.offset + self.get_step(step+2, key) + 12)
+
         elif key == "maj/min7": # this probably works for all except dim
             for step, chord in enumerate(self.chords):
                 self.chords[chord] = [
@@ -151,6 +156,8 @@ class LoChord:
                     60 + self.offset + self.get_step(step+4, self.main_scale),
                     60 + self.offset + self.get_step(step+7, self.main_scale)
                 ]
+                if GUITAR_MODE:
+                    self.chords[chord].append( 60 + self.offset + self.get_step(step, self.main_scale) + 12 )
         elif key == "maj/min9": # probably all except diminished
             for step, chord in enumerate(self.chords):
                 self.chords[chord] = [
@@ -159,6 +166,8 @@ class LoChord:
                     60 + self.offset + self.get_step(step+4, self.main_scale),
                     60 + self.offset + 12 + self.get_step(step+2, self.main_scale)
                 ]
+                if GUITAR_MODE:
+                    self.chords[chord].append( 60 + self.offset + 12 + self.get_step(step+4, self.main_scale) )
         elif key == "sus4": # almost certainly wrong
             for step, chord in enumerate(self.chords):
                 start = self.get_step(step, self.main_scale)
@@ -167,6 +176,9 @@ class LoChord:
                     60 + self.offset + start + 5,
                     60 + self.offset + start + 7,
                 ]
+                if GUITAR_MODE:
+                    self.chords[chord].append(60 + self.offset + start + 12)
+                    self.chords[chord].append(60 + self.offset + start + 17)
         elif key == "sus2":
             for step, chord in enumerate(self.chords):
                 start = self.get_step(step, self.main_scale)
@@ -175,6 +187,9 @@ class LoChord:
                     60 + self.offset + start + 2,
                     60 + self.offset + start + 7,
                 ]
+                if GUITAR_MODE:
+                    self.chords[chord].append(60 + self.offset + start + 12)
+                    self.chords[chord].append(60 + self.offset + start + 14)
         elif key == "dim": # im not sure i know what these two are.
             for step, chord in enumerate(self.chords):
                 start = self.get_step(step, self.main_scale)
@@ -183,6 +198,9 @@ class LoChord:
                     60 + self.offset + start + 3,
                     60 + self.offset + start + 6,
                 ]
+                if GUITAR_MODE:
+                    self.chords[chord].append(60 + self.offset + start + 12)
+                    self.chords[chord].append(60 + self.offset + start + 15)
         elif key == "aug":
             for step, chord in enumerate(self.chords):
                 start = self.get_step(step, self.main_scale)
@@ -191,6 +209,9 @@ class LoChord:
                     60 + self.offset + start + 4,
                     60 + self.offset + start + 8,
                 ]
+                if GUITAR_MODE:
+                    self.chords[chord].append(60 + self.offset + start + 12)
+                    self.chords[chord].append(60 + self.offset + start + 16)
         elif key == "minimal9": # tonic and 9th nothing else
             for step, chord in enumerate(self.chords):
                 self.chords[chord] = [
