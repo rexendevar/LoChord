@@ -16,6 +16,9 @@ CHORD_NAMES_CIRCLE = ["maj/min", "7", "maj/min7", "maj/min9", "sus4", "sus2", "d
 STRUM_WEIGHT = -0.25 # biases velocity towards notes at one end of the strum
 DEADZONE = 0.5 # how far from center does the stick have to move to change chords
 
+DO_RUMBLE = True
+GUITAR_MODE = False # stacks more notes for each chord. very nice (option not working yet)
+
 
 
 class LoChord:
@@ -127,15 +130,18 @@ class LoChord:
                 self.chords[chord] = [
                     60 + self.offset + self.get_step(step  , key),
                     60 + self.offset + self.get_step(step+2, key),
-                    60 + self.offset + self.get_step(step+4, key)
+                    60 + self.offset + self.get_step(step+4, key),
+                    # 60 + self.offset + self.get_step(step  , key) + 12,
+                    # 60 + self.offset + self.get_step(step+2, key) + 12
                 ]
         elif key == "7": # check this
             for step, chord in enumerate(self.chords):
+                start = self.get_step(step, self.main_scale)
                 self.chords[chord] = [
-                    60 + self.offset + self.get_step(step  , "maj"),
-                    60 + self.offset + self.get_step(step+2, "maj"),
-                    60 + self.offset + self.get_step(step+4, "maj"),
-                    60 + self.offset + self.get_step(step+7, "min")
+                    60 + self.offset + start,
+                    60 + self.offset + start + 4,
+                    60 + self.offset + start + 7,
+                    60 + self.offset + start + 10
                 ]
         elif key == "maj/min7": # this probably works for all except dim
             for step, chord in enumerate(self.chords):
@@ -155,31 +161,35 @@ class LoChord:
                 ]
         elif key == "sus4": # almost certainly wrong
             for step, chord in enumerate(self.chords):
+                start = self.get_step(step, self.main_scale)
                 self.chords[chord] = [
-                    60 + self.offset + self.get_step(step  , self.main_scale),
-                    60 + self.offset + self.get_step(step+3, self.main_scale),
-                    60 + self.offset + self.get_step(step+4, self.main_scale),
+                    60 + self.offset + start,
+                    60 + self.offset + start + 5,
+                    60 + self.offset + start + 7,
                 ]
         elif key == "sus2":
             for step, chord in enumerate(self.chords):
+                start = self.get_step(step, self.main_scale)
                 self.chords[chord] = [
-                    60 + self.offset + self.get_step(step  , self.main_scale),
-                    60 + self.offset + self.get_step(step+1, self.main_scale),
-                    60 + self.offset + self.get_step(step+4, self.main_scale),
+                    60 + self.offset + start,
+                    60 + self.offset + start + 2,
+                    60 + self.offset + start + 7,
                 ]
         elif key == "dim": # im not sure i know what these two are.
             for step, chord in enumerate(self.chords):
+                start = self.get_step(step, self.main_scale)
                 self.chords[chord] = [
-                    60 + self.offset + self.get_step(step  , self.main_scale),
-                    60 + self.offset + self.get_step(step  , self.main_scale) + 3,
-                    60 + self.offset + self.get_step(step  , self.main_scale) + 6,
+                    60 + self.offset + start,
+                    60 + self.offset + start + 3,
+                    60 + self.offset + start + 6,
                 ]
         elif key == "aug":
             for step, chord in enumerate(self.chords):
+                start = self.get_step(step, self.main_scale)
                 self.chords[chord] = [
-                    60 + self.offset + self.get_step(step  , self.main_scale),
-                    60 + self.offset + self.get_step(step  , self.main_scale) + 4,
-                    60 + self.offset + self.get_step(step  , self.main_scale) + 8,
+                    60 + self.offset + start,
+                    60 + self.offset + start + 4,
+                    60 + self.offset + start + 8,
                 ]
         elif key == "minimal9": # tonic and 9th nothing else
             for step, chord in enumerate(self.chords):
@@ -203,6 +213,7 @@ class LoChord:
                 self.chords[key][1] += 12
             self.chords[key].sort()
             # inversion: if newly pitched up note overlaps 7th or 9th, pitch up the 7th or 9th also
+            # REVISIT THIS cause it's BROKEN
             if len(self.chords[key]) != len(set(self.chords[key])):
                 self.chords[key][-1] += 12
 
@@ -270,8 +281,7 @@ class LoChord:
                 self.strum_focus[1] = self.strum_focus[0]
                 self.strum_focus[0] = key
                 # and release prev chord if it's released
-                if self.strum_focus[1] not in self.pressed_keys:
-                    self.release_key(self.strum_focus[1])
+                self.release_key(self.strum_focus[1], self.strum_focus[1] not in self.pressed_keys)
             for note in chord:
                 self.unstopped.add(note)
                 self.register(note, key)
@@ -290,7 +300,7 @@ class LoChord:
 
 
 
-    def release_key( self, key: str ) -> None:
+    def release_key( self, key: str, full: bool = True ) -> None:
         '''key is released, do logic to see what happens'''
         try:
             chord = self.chords[key]
@@ -303,7 +313,7 @@ class LoChord:
                     l.append(note)
                 for note in l:
                     self.chord_to_strum.remove(note)
-                if (key == self.strum_focus[1] or not self.strum_mode):
+                if (key == self.strum_focus[1] or not self.strum_mode) and full:
                     midi_out.send_message([0x80 | CHANNEL, note, 0])
 
 
@@ -349,6 +359,7 @@ class LoChord:
             vel_modifier = 1+ STRUM_WEIGHT
         else:
             vel_modifier = 1- STRUM_WEIGHT
+
         # fully press and release trigger with nothing sleected to stop all notes
         if self.pressed_keys: # disqualify
             self.stop_state = -1
@@ -359,6 +370,7 @@ class LoChord:
             self.stop_state = 1
         elif pressure == 1023 and self.stop_state == 1:
             self.stop_state = 2
+
         for i, step in enumerate(positions):
             if self.strum_pos <= step <= pressure or pressure <= step <= self.strum_pos: # if trigger just passed over a strummable note
                 if i == 0 or i == len(positions)-1:
@@ -383,6 +395,8 @@ class LoChord:
 
     def do_rumble( self, device: InputDevice, strength: int ):
         '''rumble the controller. returns an effect_id which is a data type i don't know.'''
+        if not DO_RUMBLE:
+            return 0
         rumble = ff.Rumble(strong_magnitude=0x0F00, weak_magnitude=(128+strength*384))
         effect_type = ff.EffectType(ff_rumble_effect=rumble)
         duration_ms = 100
