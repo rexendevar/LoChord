@@ -46,13 +46,13 @@ Any chord button + main button cycles between inversions.
 
 # To do
 VERY VERY early version here. Still want to do
-- more versatile strum mode so u can do ska & other better music
+- more versatile strum mode so u can do ska & other better music DONE
 - strum weighting where low strings play louder on upstroke or something DONE
-- refine the joystick cause some of the chords are wrong for sure
+- refine the joystick cause some of the chords are wrong for sure DONE
 - lead mode
 - configurable larger chords e.g. 2 octaves of a triad stacked, bass note etc
-- rewrite it all with a class so i'm not misusing global vars so badly
-- windows version
+- rewrite it all with a class so i'm not misusing global vars so badly DONE
+- windows version LOOKS LIKE ITLL BE A PAIN IN THE ASS
 - put it in a ras pi for my dawless setup
 - integrate my new evil features better
 - ill think of more
