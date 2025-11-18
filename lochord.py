@@ -1,23 +1,33 @@
 #!/usr/bin/env python3
-from evdev import InputDevice, list_devices, categorize, ecodes, ff
 import rtmidi
 import math
 import numpy as np
 import time
+from sys import platform
+WIN = platform == "win32"
+if not WIN:
+    from evdev import InputDevice, list_devices, categorize, ecodes, ff
+else:
+    from inputs import devices, get_gamepad
+    import mido
+    import ctypes
+    import atexit
 
-TARGET_NAME = "Generic X-Box pad"
+TARGET_NAME = "X-Box pad"
 CHANNEL = 0  # MIDI channel 1
-RECORDING_MODE = False # send note offs before note ons in strum mode?
+MIDI_PORT_NAME = "LoChord"
+RECORDING_MODE = True # send note offs before note ons in strum mode?
 CHORD_NAMES_CIRCLE = ["maj/min", "7", "maj/min7", "maj/min9", "sus4", "sus2", "dim", "aug"]
 # clockwise from the top
 # you can swap these out! (coming soon)
 # default is ["maj/min", "7", "maj/min7", "maj/min9", "sus4", "sus2", "dim", "aug"]
 
-STRUM_WEIGHT = -0.25 # biases velocity towards notes at one end of the strum
+STRUM_WEIGHT = -0.15 # biases velocity towards notes at one end of the strum
 DEADZONE = 0.5 # how far from center does the stick have to move to change chords
 
 DO_RUMBLE = True
 GUITAR_MODE = True # stacks more notes for each chord. very nice
+BASS = True
 
 
 
@@ -26,8 +36,8 @@ class LoChord:
         # you can change things in this section if they don't work right, but you shouldn't have to.
         self.chords: dict[ str, list[int] ] = {
             "BTN_A":    [], # A
-            "BTN_NORTH":[], # X
-            "BTN_WEST": [], # Y
+            "BTN_X":    [], # X
+            "BTN_Y":    [], # Y
             "BTN_B":    [], # B
             "BTN_TR":   [], # right bumper
             "BTN_TL":   [], # left bumper
@@ -46,8 +56,8 @@ class LoChord:
         self.offset: int = 0
         self.changes: dict[ str, list[int] ] = { # [ octave shift, inversion ]
             "BTN_A":     [0,0],
-            "BTN_NORTH": [0,0],
-            "BTN_WEST":  [0,0],
+            "BTN_X":     [0,0],
+            "BTN_Y":     [0,0],
             "BTN_B":     [0,0],
             "BTN_TR":    [0,0],
             "BTN_TL":    [0,0],
@@ -66,6 +76,7 @@ class LoChord:
         self.rumble = 0 # evdev effect id but idk what data type it is
         self.unstopped: set[int] = set()
         self.stop_state: int = -1 # for tracking manual note-offs
+        self.chord_changed: str | None = None
         # general note/button tracking
         self.pressed_keys: set = set()
         self.currently_pressed: dict[ int, list[str] ] = {}
@@ -73,6 +84,7 @@ class LoChord:
         self.main_held: bool = False
         self.save_held: bool = False
         self.load_held: bool = False
+        self.f13_down: bool = False
 
         # this section is constants.
         self.major = [ 0, 2, 2, 1, 2, 2, 2, 1 ]
@@ -81,6 +93,9 @@ class LoChord:
         self.minor_tally = []
         self.tally()
         self.generate_scale()
+        self.f13 = 0x7C
+        if WIN:
+            self.check_key = ctypes.windll.user32.GetAsyncKeyState
 
 
     def tally(self) -> None:
@@ -95,6 +110,20 @@ class LoChord:
             self.minor_tally.append(note + note_tally)
             note_tally += note
 
+
+    def note_on(self, note: int, velocity: int) -> None:
+        if not WIN:
+            midi_out.send_message([0x90 | CHANNEL, note, velocity])
+        else:
+            msg = mido.Message("note_on", note=note, velocity=velocity, channel=CHANNEL)
+            midi_out.send(msg)
+
+    def note_off(self, note: int) -> None:
+        if not WIN:
+            midi_out.send_message([0x80 | CHANNEL, note, 0])
+        else:
+            msg = mido.Message("note_off", note=note, velocity=0, channel=CHANNEL)
+            midi_out.send(msg)
 
 
     def get_step(self, step: int=0, key: str="maj") -> int:
@@ -135,7 +164,10 @@ class LoChord:
                 if GUITAR_MODE:
                     self.chords[chord].append(60 + self.offset + self.get_step(step  , key) + 12)
                     self.chords[chord].append(60 + self.offset + self.get_step(step+2, key) + 12)
-        elif key == "7": # check this
+                if BASS:
+                    self.chords[chord].append(60 + self.offset + self.get_step(step  , key) -12)
+
+        elif key == "7":
             for step, chord in enumerate(self.chords):
                 start = self.get_step(step, self.main_scale)
                 self.chords[chord] = [
@@ -147,6 +179,8 @@ class LoChord:
                 if GUITAR_MODE:
                     self.chords[chord].append(60 + self.offset + start + 12)
                     #self.chords[chord].append(60 + self.offset + self.get_step(step+2, key) + 12)
+                if BASS:
+                    self.chords[chord].append(60 + self.offset + start -12)
 
         elif key == "maj/min7": # this probably works for all except dim
             for step, chord in enumerate(self.chords):
@@ -158,6 +192,9 @@ class LoChord:
                 ]
                 if GUITAR_MODE:
                     self.chords[chord].append( 60 + self.offset + self.get_step(step, self.main_scale) + 12 )
+                if BASS:
+                    self.chords[chord].append( 60 + self.offset + self.get_step(step, self.main_scale) -12 )
+
         elif key == "maj/min9": # probably all except diminished
             for step, chord in enumerate(self.chords):
                 self.chords[chord] = [
@@ -168,7 +205,10 @@ class LoChord:
                 ]
                 if GUITAR_MODE:
                     self.chords[chord].append( 60 + self.offset + 12 + self.get_step(step+4, self.main_scale) )
-        elif key == "sus4": # almost certainly wrong
+                if BASS:
+                    self.chords[chord].append( 60 + self.offset + self.get_step(step, self.main_scale) -12 )
+
+        elif key == "sus4":
             for step, chord in enumerate(self.chords):
                 start = self.get_step(step, self.main_scale)
                 self.chords[chord] = [
@@ -179,6 +219,9 @@ class LoChord:
                 if GUITAR_MODE:
                     self.chords[chord].append(60 + self.offset + start + 12)
                     self.chords[chord].append(60 + self.offset + start + 17)
+                if BASS:
+                    self.chords[chord].append(60 + self.offset + start -12 )
+
         elif key == "sus2":
             for step, chord in enumerate(self.chords):
                 start = self.get_step(step, self.main_scale)
@@ -190,7 +233,10 @@ class LoChord:
                 if GUITAR_MODE:
                     self.chords[chord].append(60 + self.offset + start + 12)
                     self.chords[chord].append(60 + self.offset + start + 14)
-        elif key == "dim": # im not sure i know what these two are.
+                if BASS:
+                    self.chords[chord].append(60 + self.offset + start -12 )
+
+        elif key == "dim":
             for step, chord in enumerate(self.chords):
                 start = self.get_step(step, self.main_scale)
                 self.chords[chord] = [
@@ -201,6 +247,9 @@ class LoChord:
                 if GUITAR_MODE:
                     self.chords[chord].append(60 + self.offset + start + 12)
                     self.chords[chord].append(60 + self.offset + start + 15)
+                if BASS:
+                    self.chords[chord].append(60 + self.offset + start -12 )
+
         elif key == "aug":
             for step, chord in enumerate(self.chords):
                 start = self.get_step(step, self.main_scale)
@@ -212,11 +261,21 @@ class LoChord:
                 if GUITAR_MODE:
                     self.chords[chord].append(60 + self.offset + start + 12)
                     self.chords[chord].append(60 + self.offset + start + 16)
+                if BASS:
+                    self.chords[chord].append(60 + self.offset + start -12 )
+
         elif key == "minimal9": # tonic and 9th nothing else
             for step, chord in enumerate(self.chords):
                 self.chords[chord] = [
                     60 + self.offset + self.get_step(step  , self.main_scale),
                     60 + self.offset + 12 + self.get_step(step+2, self.main_scale)
+                ]
+
+        elif key == "perfect5":
+            for step, chord in enumerate(self.chords):
+                self.chords[chord] = [
+                    60 + self.offset + self.get_step(step, self.main_scale),
+                    60 + self.offset + self.get_step(step, self.main_scale) + 7
                 ]
 
         for key in self.chords: # apply octave/inversion
@@ -233,10 +292,17 @@ class LoChord:
             if self.changes[key][1] == 2:
                 self.chords[key][1] += 12
             self.chords[key].sort()
-            # inversion: if newly pitched up note overlaps 7th or 9th, pitch up the 7th or 9th also
-            # REVISIT THIS cause it's BROKEN
-            if len(self.chords[key]) != len(set(self.chords[key])):
-                self.chords[key][-1] += 12
+            # inversion: fix overlaps
+            while len(self.chords[key]) != len(set(self.chords[key])):
+                temp = []
+                for note in self.chords[key]:
+                    if not note in temp:
+                        temp.append(note)
+                    else:
+                        temp.append(note + 12)
+                temp.sort()
+                self.chords[key] = temp
+
 
         self.change_on_the_fly()
 
@@ -253,7 +319,7 @@ class LoChord:
         remove = []
         for note in self.currently_pressed:
             if not note in new_notes:
-                midi_out.send_message([0x80 | CHANNEL, note, 0]) # stop all notes that shouldn't be on
+                self.note_off(note) # stop all notes that shouldn't be on
                 remove.append(note)
         for note in remove:
             del self.currently_pressed[note]
@@ -262,7 +328,7 @@ class LoChord:
         for note in new_notes:
             if not self.strum_mode:
                 if not note in self.currently_pressed:
-                    midi_out.send_message([0x90 | CHANNEL, note, self.velocity]) # start all notes that now should be on
+                    self.note_on(note, self.velocity) # start all notes that now should be on
                 else:
                     if not note in self.chord_to_strum:
                         self.chord_to_strum.append(note)
@@ -293,7 +359,7 @@ class LoChord:
         if not self.strum_mode:
             for note in chord:
                 self.register(note, key)
-                midi_out.send_message([0x90 | CHANNEL, note, self.velocity])
+                self.note_on(note, self.velocity)
         else:
             if key != self.strum_focus[0]:
                 # note-off double prev chord (this MIGHT not work?)
@@ -302,7 +368,8 @@ class LoChord:
                 self.strum_focus[1] = self.strum_focus[0]
                 self.strum_focus[0] = key
                 # and release prev chord if it's released
-                self.release_key(self.strum_focus[1], self.strum_focus[1] not in self.pressed_keys)
+                if self.strum_focus[1] not in self.pressed_keys:
+                    self.chord_changed = self.strum_focus[1]
             for note in chord:
                 self.unstopped.add(note)
                 self.register(note, key)
@@ -335,7 +402,7 @@ class LoChord:
                 for note in l:
                     self.chord_to_strum.remove(note)
                 if (key == self.strum_focus[1] or not self.strum_mode) and full:
-                    midi_out.send_message([0x80 | CHANNEL, note, 0])
+                    self.note_off(note)
 
 
     def try_release( self, note: int, source: str | None = None ) -> bool:
@@ -365,7 +432,7 @@ class LoChord:
         self.pressed_keys = set()
         self.strum_focus = ["", ""]
         for note in self.unstopped:
-            midi_out.send_message([0x80 | CHANNEL, note, 0])
+            self.note_off(note)
         self.unstopped = set()
 
 
@@ -392,23 +459,28 @@ class LoChord:
         elif pressure == 1023 and self.stop_state == 1:
             self.stop_state = 2
 
+        # TODO: only send note offs when starting a strum
+
         for i, step in enumerate(positions):
             if self.strum_pos <= step <= pressure or pressure <= step <= self.strum_pos: # if trigger just passed over a strummable note
                 if i == 0 or i == len(positions)-1:
                     self.strum_clock = time.monotonic_ns()
                 else:
+                    if self.chord_changed:
+                        self.release_key(self.chord_changed)
+                        self.chord_changed = None
                     if self.rumble != 0:
                         device.erase_effect(self.rumble)
                     step = step/1024 * 5
                     elapsed = time.monotonic_ns() - self.strum_clock
                     elapsed *= len(self.chord_to_strum)
                     # increase divisor to bias louder VVV
-                    vel = int(min( 127 / (elapsed / 30000000 ), 127)) # determine velocity by time between notes
+                    vel = int(min( 127 / (elapsed / 10000000 ), 127)) # determine velocity by time between notes
                     vel *= (1 / vel_modifier**(step)) # weigh the strum
                     vel = int(min(vel, 127))
                     if RECORDING_MODE:
-                        midi_out.send_message([0x80 | CHANNEL, self.chord_to_strum[i-1], 0])
-                    midi_out.send_message([0x90 | CHANNEL, self.chord_to_strum[i-1], vel])
+                        self.note_off(self.chord_to_strum[i-1])
+                    self.note_on(self.chord_to_strum[i-1], vel)
                     self.rumble = self.do_rumble(device, vel)
                     self.strum_clock = time.monotonic_ns()
         self.strum_pos = pressure
@@ -464,63 +536,55 @@ class LoChord:
                 self.strum_mode = True
             elif strum == "False":
                 self.strum_mode = False
+                self.all_notes_off()
         print(f"loaded {slot}")
         self.generate_scale()
 
 
 
+    def process_button(self, button: str, down: bool):
+        if button == "BTN_MODE":
+            if down:
+                self.main_held = True
+                if self.pressed_keys:
+                    for key in self.pressed_keys:
+                        self.changes[key][1] = ( self.changes[key][1] + 1 ) % 3
+                    self.generate_scale()
 
-    def process_frame(self, event) -> None:
-        '''does all the heavy lifting'''
-        if event.type == ecodes.EV_KEY:
-            key = categorize(event)
-            button = key.keycode
+            else:
+                self.main_held = False
 
-            if button == "BTN_MODE":
-                if key.keystate == key.key_down:
-                    self.main_held = True
-                    if self.pressed_keys:
-                        for key in self.pressed_keys:
-                            self.changes[key][1] = ( self.changes[key][1] + 1 ) % 3
-                        self.generate_scale()
+        if button == "BTN_SELECT":
+            if down:
+                self.save_held = True
+                if self.load_held:
+                    self.load("default")
+            else:
+                self.save_held = False
 
-                elif key.keystate == key.key_up:
-                    self.main_held = False
+        if button == "BTN_START":
+            if down:
+                self.load_held = True
+            else:
+                self.load_held = False
 
-            if button == "BTN_SELECT":
-                if key.keystate == key.key_down:
-                    self.save_held = True
-                    if self.load_held:
-                        self.load("default")
-                elif key.keystate == key.key_up:
-                    self.save_held = False
-
-            if button == "BTN_START":
-                if key.keystate == key.key_down:
-                    self.load_held = True
-                elif key.keystate == key.key_up:
-                    self.load_held = False
-
-            if isinstance(button, list):
-                button = button[0]
-
-            if button in self.chords:
-                if self.load_held and key.keystate == key.key_down:
-                    self.load(button)
-                elif self.save_held and key.keystate == key.key_down:
-                    self.save(button)
+        if button in self.chords:
+            if self.load_held and down:
+                self.load(button)
+            elif self.save_held and down:
+                self.save(button)
+            else:
+                if down:
+                    self.play_key(button)
                 else:
-                    if key.keystate == key.key_down:
-                        self.play_key(button)
-                    elif key.keystate == key.key_up:
-                        self.release_key(button)
+                    self.release_key(button)
 
-        elif event.type == ecodes.EV_ABS:
-            code = ecodes.ABS[event.code] if event.code in ecodes.ABS else None
 
-            if code == "ABS_RZ": # velocity
-                note, threshold, active = self.abs_triggers[code]
-                value = event.value
+
+    def process_axis(self, code: str, value: int) -> None:
+        if code == "ABS_RZ": # velocity
+            note, threshold, active = self.abs_triggers[code]
+            if not self.pressed_keys:
                 if self.main_held:
                     if not active and value > threshold:
                         self.strum_mode = not self.strum_mode
@@ -529,89 +593,194 @@ class LoChord:
                         self.chord_to_strum = []
                     elif active and value <= threshold:
                         self.abs_triggers[code][2] = False
-                elif not self.strum_mode:
-                    self.velocity = int( 127 - event.value/8 )
-                else:
-                    self.try_strum(event.value, device)
-
-            elif code in self.abs_triggers: # the 7th scale degree is played by the left trigger
-                note, threshold, active = self.abs_triggers[code]
-                value = event.value
-                if code in self.chords:
+                elif self.load_held:
                     if not active and value > threshold:
-                        # Trigger note-on
-                        if self.save_held:
-                            self.save(code)
-                        else:
-                            self.play_key(code)
-                        self.abs_triggers[code][2] = True  # mark active
+                        global RECORDING_MODE
+                        RECORDING_MODE = not RECORDING_MODE
+                        print("Recording mode is ON" if RECORDING_MODE else "Recording mode is OFF")
+                        self.abs_triggers[code][2] = True
+                        self.chord_to_strum = []
                     elif active and value <= threshold:
-                        # Trigger note-off
-                        self.release_key(code)
                         self.abs_triggers[code][2] = False
 
+            elif not self.strum_mode:
+                self.velocity = int( 127 - value/8 )
+            else:
+                self.try_strum(value, device)
 
-            elif code == "ABS_X" or code == "ABS_Y": # process joystick values
-                if code == "ABS_X":
-                    self.joystick[0] = event.value / 32768
-                elif code == "ABS_Y":
-                    self.joystick[1] = 0 - (event.value / 32768)
-                self.interpret_joystick()
+        elif code in self.abs_triggers: # the 7th scale degree is played by the left trigger
+            note, threshold, active = self.abs_triggers[code]
+            if code in self.chords:
+                if not active and value > threshold:
+                    # Trigger note-on
+                    if self.save_held:
+                        self.save(code)
+                    else:
+                        self.play_key(code)
+                    self.abs_triggers[code][2] = True  # mark active
+                elif active and value <= threshold:
+                    # Trigger note-off
+                    self.release_key(code)
+                    self.abs_triggers[code][2] = False
 
-            elif code == "ABS_HAT0X": # change key
-                if self.main_held:
-                    self.offset = 0
+
+        elif code == "ABS_X" or code == "ABS_Y": # process joystick values
+            if code == "ABS_X":
+                self.joystick[0] = value / 32768
+            elif code == "ABS_Y":
+                self.joystick[1] = 0 - (value / 32768)
+            self.interpret_joystick()
+
+        elif code == "ABS_HAT0X": # change key
+            if self.main_held:
+                if value == 1:
+                    global GUITAR_MODE
+                    GUITAR_MODE = not GUITAR_MODE
+                elif value == -1:
+                    global BASS
+                    BASS = not BASS
+            else:
+                self.offset += value
+            self.generate_scale()
+
+        elif code == "ABS_HAT0Y":
+            if self.main_held and value != 0: # swap main scale
+                self.main_scale = self.maj_min()
+                self.current_chord = "main"
+            elif self.pressed_keys and value != 0: # octave for selected chords
+                for key in self.pressed_keys:
+                    self.changes[key][0] -= value
+            else:
+                self.offset -= 12* value # global octave
+            self.generate_scale()
+
+        # elif code == "ABS_RY":
+        #     for note in TO_STOP:
+        #         midi_out.send_message([0x80 | CHANNEL, note, 0])
+        #     TO_STOP.clear()
+
+
+
+    def process_frame_linux(self, event) -> None:
+        '''does all the heavy lifting'''
+        if event.type == ecodes.EV_KEY:
+            key = categorize(event)
+            button = key.keycode
+
+            if isinstance(button, list):
+                if "BTN_A" in button:
+                    button = "BTN_A"
+                elif "BTN_X" in button:
+                    button = "BTN_X"
+                elif "BTN_Y" in button:
+                    button = "BTN_Y"
+                elif "BTN_B" in button:
+                    button = "BTN_B"
                 else:
-                    self.offset += event.value
-                self.generate_scale()
+                    button = button[0]
+            down = key.keystate == key.key_down
+            self.process_button(button, down)
 
-            elif code == "ABS_HAT0Y":
-                if self.main_held and event.value != 0: # swap main scale
-                    self.main_scale = self.maj_min()
-                    self.current_chord = "main"
-                elif self.pressed_keys and event.value != 0: # octave for selected chords
-                    for key in self.pressed_keys:
-                        self.changes[key][0] -= event.value
-                else:
-                    self.offset -= 12* event.value # global octave
-                self.generate_scale()
+        elif event.type == ecodes.EV_ABS:
+            code = ecodes.ABS[event.code] if event.code in ecodes.ABS else None
+            self.process_axis(code, event.value)
 
-            # elif code == "ABS_RY":
-            #     for note in TO_STOP:
-            #         midi_out.send_message([0x80 | CHANNEL, note, 0])
-            #     TO_STOP.clear()
+
+
+    def process_frame_windows(self) -> None:
+        if self.check_key(self.f13):
+            if not self.f13_down:
+                self.process_button("BTN_MODE", True)
+                self.f13_down = True
+        else:
+            if self.f13_down:
+                self.process_button("BTN_MODE", False)
+                self.f13_down = False
+        events = get_gamepad()
+        for e in events:
+            if e.ev_type == "Key":
+                self.process_button(e.code, e.state)
+            elif e.ev_type == "Absolute":
+                self.process_axis(e.code, e.state)
+        time.sleep(0.008)
+
+
+
+    # ai bot ass windows functions probably broken as shit and dont work
+    def find_gamepad(self):
+        for g in devices.gamepads:
+            if TARGET_NAME.lower() in g.name.lower():
+                print(f"Using controller: {g.name}")
+                return g
+        raise RuntimeError(f"Controller '{TARGET_NAME}' not found")
+
+
+    def find_port_by_name(self, name:str):
+        ports = midi_out.get_ports()
+        for i, p in enumerate(ports):
+            if name in p:
+                return i
+        return None
+
+
+    def ensure_virtual_port(self):
+        port_index = self.find_port_by_name(MIDI_PORT_NAME)
+        if port_index is not None:
+            return port_index
+        # Launch loopMIDI if not found
+        input(f"Open loopMIDI and create a port called {MIDI_PORT_NAME} and then press enter here")
+        # Wait until port appears
+        for _ in range(20):
+            time.sleep(0.5)
+            port_index = self.find_port_by_name(MIDI_PORT_NAME)
+            if port_index is not None:
+                break
+        else:
+            raise RuntimeError(f"No MIDI port called {MIDI_PORT_NAME}")
+        return port_index
+
+
 
 
 
 def main():
-    global device
-    device = None
-    for path in list_devices():
-        dev = InputDevice(path)
-        if TARGET_NAME.lower() in dev.name.lower():
-            device = dev
-            break
-
-    if not device:
-        raise RuntimeError(f"Controller '{TARGET_NAME}' not found. Available devices:")
-        for path in list_devices():
-            print(InputDevice(path).name)
-        exit(1)
-
-    print(f"Using controller: {device.name} ({device.path})")
-
+    lc = LoChord()
     global midi_out
     midi_out = rtmidi.MidiOut()
-    midi_out.open_virtual_port("LoChord")
 
-    lc = LoChord()
-    print("Listening for gamepad button presses...")
 
-    try:
-        for event in device.read_loop():
-            lc.process_frame(event)
-    except KeyboardInterrupt:
-        pass
+    if not WIN:
+        global device
+        device = None
+        for path in list_devices():
+            dev = InputDevice(path)
+            if TARGET_NAME.lower() in dev.name.lower():
+                device = dev
+                break
+        if not device:
+            raise RuntimeError(f"Controller '{TARGET_NAME}' not found")
+        print(f"Using controller: {device.name} ({device.path})")
+
+        midi_out.open_virtual_port(MIDI_PORT_NAME)
+        print("Listening for gamepad button presses...")
+        try:
+            for event in device.read_loop():
+                lc.process_frame_linux(event)
+        except KeyboardInterrupt:
+            pass
+
+
+
+    else:
+        port_index = lc.ensure_virtual_port()
+        midi_out.open_port(port_index)
+        atexit.register(lambda: midi_out.close_port())
+        print("Listening for gamepad button presses...")
+        try:
+            while True:
+                lc.process_frame_windows()
+        except KeyboardInterrupt:
+            pass
 
 
 
