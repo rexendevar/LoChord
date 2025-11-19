@@ -1,11 +1,14 @@
 CONTROLLER_NAME = "X-box"
-CHANNEL = 0  # MIDI channel 1
-MIDI_PORT_NAME = "LoChord"
 DO_RUMBLE = True
 TRIGGER_DEPTH = 0 # run the script and follow the instructions.
-
-STRUM_WEIGHT = -0.15 # biases velocity towards notes at one end of the strum
+POLL_RATE = 125 # Hertz
 DEADZONE = 0.5 # how far from center does the stick have to move to change chords
+
+CHANNEL = 0  # MIDI channel 1
+MIDI_PORT_NAME = "LoChord"
+
+VELOCITY_SENSITIVITY = 2
+STRUM_WEIGHT = -0.15 # biases velocity towards notes at one end of the strum
 
 CHORD_NAMES_CIRCLE = ["maj/min", "7", "maj/min7", "maj/min9", "sus4", "sus2", "dim", "aug"]
 # clockwise from the top
@@ -454,13 +457,12 @@ class LoChord:
         '''process right trigger to strum and rumble the controller'''
 
         # generate the list of strum positions
-        sep = (TRIGGER_DEPTH) // (len(self.chord_to_strum)+2)
-        positions = [10] # will break any digital trigger but if your trigger isn't analog you can't strum anyway
+        sep = (TRIGGER_DEPTH-4) // (len(self.chord_to_strum)+2)
+        positions = [4] # will break any digital trigger but if your trigger isn't analog you can't strum anyway
         for i, note in enumerate(self.chord_to_strum):
             positions.append( sep*(1+i) )
         positions.append( sep*(1+len(self.chord_to_strum)) )
-        print("frame")
-        print(pressure)
+        #print("frame")
 
         if self.strum_pos < pressure: # if trigger is pushing IN this frame:
             vel_modifier = 1+ STRUM_WEIGHT
@@ -478,13 +480,13 @@ class LoChord:
         elif pressure == TRIGGER_DEPTH and self.stop_state == 1:
             self.stop_state = 2
 
+        slope = abs((pressure - self.strum_pos))/(1/POLL_RATE)
+        #print(abs((pressure - self.strum_pos)))
+
         for i, step in enumerate(positions):
             if self.strum_pos <= step <= pressure or pressure <= step <= self.strum_pos: # if trigger just passed over a strummable position
                 # the positions on either end of the strum are timing markers to properly measure note velocity
-                if i == 0 or i == len(positions)-1:
-                    self.strum_clock = time.perf_counter()
-                # every other position is a note
-                else:
+                if not (i == 0 or i == len(positions)-1):
                     # only send note offs for the previous chord when the next strum starts
                     if self.chord_changed:
                         self.release_key(self.chord_changed)
@@ -493,13 +495,10 @@ class LoChord:
                     if self.rumble != 0:
                         device.erase_effect(self.rumble)
 
-                    # calculate velocity - function of time between notes
+                    # calculate velocity
+                    vel = slope/750
+                    vel = 127* (1 - ( (1 - ( min( vel, 127) / 127 ))**VELOCITY_SENSITIVITY ) )
                     step = step/(TRIGGER_DEPTH+1) * 5
-                    elapsed = time.perf_counter() - self.strum_clock
-                    elapsed *= len(self.chord_to_strum)
-                    print(elapsed)
-                    #decrease to bias louder V
-                    vel = 127 / ( math.sqrt(elapsed) * 127 )
                     vel *= (1 / vel_modifier**(step)) # weigh the strum
                     vel = int(min(vel, 127))
 
@@ -508,7 +507,6 @@ class LoChord:
                     self.note_on(self.chord_to_strum[i-1], vel)
                     if not WIN:
                         self.rumble = self.do_rumble(device, vel)
-                    self.strum_clock = time.perf_counter()
 
         self.strum_pos = pressure
 
@@ -732,6 +730,7 @@ class LoChord:
         elif event.type == ecodes.EV_ABS:
             code = ecodes.ABS[event.code] if event.code in ecodes.ABS else None
             self.process_axis(code, event.value)
+        self.strum_clock = time.perf_counter()
 
 
     def check_f13_thread(self) -> None:
@@ -754,7 +753,7 @@ class LoChord:
                 self.process_button(e.code, e.state)
             elif e.ev_type == "Absolute":
                 self.process_axis(e.code, e.state)
-        #time.sleep(0.001)
+        time.sleep(0.001)
 
 
 
