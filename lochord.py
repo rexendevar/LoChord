@@ -59,8 +59,8 @@ class LoChord:
         self.main_chord: str = "main" # coming sometime: configuring default chords & such
         self.offset: int = 0
         self.changes: dict[ str, list[int] ] = {} # [ octave shift, inversion ]
-        self.guitar_mode = False # stack more notes for each chord? very nice
-        self.bass_mode = False # add a note an octave below every chord?
+        self.guitar_mode = True # stack more notes for each chord? very nice
+        self.bass_mode = True # add a note an octave below every chord?
         self.note_safe = True # send note offs before note ons in strum mode?
 
         # joystick
@@ -94,10 +94,6 @@ class LoChord:
         self.f13_down: bool = False
         self.trigger: int = 0
         self.run_thread: bool = True
-
-        self.tr = 0
-        self.time = 0.0
-
 
         # this section is constants.
         self.major = [ 0, 2, 2, 1, 2, 2, 2, 1 ]
@@ -496,7 +492,7 @@ class LoChord:
                         device.erase_effect(self.rumble)
 
                     # calculate velocity
-                    vel = slope/750
+                    vel = slope/(TRIGGER_DEPTH*0.75)
                     vel = 127* (1 - ( (1 - ( min( vel, 127) / 127 ))**VELOCITY_SENSITIVITY ) )
                     step = step/(TRIGGER_DEPTH+1) * 5
                     vel *= (1 / vel_modifier**(step)) # weigh the strum
