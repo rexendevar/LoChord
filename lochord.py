@@ -59,8 +59,8 @@ class LoChord:
         self.main_chord: str = "main" # coming sometime: configuring default chords & such
         self.offset: int = 0
         self.changes: dict[ str, list[int] ] = {} # [ octave shift, inversion ]
-        self.guitar_mode = True # stack more notes for each chord? very nice
-        self.bass_mode = True # add a note an octave below every chord?
+        self.guitar_mode = False # stack more notes for each chord? very nice
+        self.bass_mode = False # add a note an octave below every chord?
         self.note_safe = True # send note offs before note ons in strum mode?
 
         # joystick
