@@ -57,6 +57,8 @@ Strum mode is subject to:
 ## Lead mode
 Lead mode turns a chord into only one note. Useful for bass - might be useful for soloing if you can figure out the technique? Toggle it with `save` + right trigger. Compatible with strum mode but NOT compatible with bass or guitar mode.
 
+The joystick becomes octave and pitch bend.
+
 ## Bass and guitar mode
 Bass mode adds an extra note below the fundamental. Guitar mode adds notes to each chord so there's 5 per chord (plus bass if it's on). Toggle these with `main` + dpad left and right respectively.
 
