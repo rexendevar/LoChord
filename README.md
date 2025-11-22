@@ -46,8 +46,8 @@ LoChord's strum mode lays out each note of the current chord along the travel of
 Readme is a work in progress. Use the main button + right trigger to toggle strum mode, then hold down a chord button and press right trigger in and out to strum. Fully press and release the trigger (with no chord button pressed) to manually stop all notes. 
 
 Switching chords can take a little practice!
-- To STOP the current chord before the next one, press the next chord's button and THEN release the current chord button.
-- To CONTINUE the current chord legato-style, release the current chord's button and then press the next chord's button. The current chord will stop when the next strum begins.
+- To STOP the current chord before the next one, PRESS the next chord's button and then RELEASE the current chord button.
+- To CONTINUE the current chord legato-style, RELEASE the current chord's button and then PRESS the next chord's button. The current chord will stop when the next strum begins.
 
 Strum mode is subject to:
 - STRUM_WEIGHT - Makes notes louder at one end of the strum. By default notes at the end will be slightly louder, which is kind of guitar-like I think.
