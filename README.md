@@ -18,10 +18,10 @@ Make sure u have Python modules `evdev` and `python-rtmidi`. The rest should alr
 Once it's configured, running the script will create a MIDI node in your audio system, which you'll likely need to manually connect to your DAW using a patchbay program such as Helvum. After that it's connected and should work.
 
 # Setup (Windows)
-use loopMIDI to make a midi port called LoChord
-use AntiMicroX and bind the guide button to F13 (no there is NOT an easier way)
+- use loopMIDI to make a midi port called LoChord
+- use AntiMicroX and bind the guide button to F13 (no there is NOT an easier way)
 
-install python modules `ctypes` `threading` `python-rtmidi` `numpy` and `atexit`. then run the script
+install python modules `ctypes` `threading` `python-rtmidi` `numpy` and `atexit`. then run the script. you're gonna have to stop it and edit it. then run it again. then connect the midi device to your daw (slightly better setup process coming soon)
 
 # Setup (MacOS)
 Doesn't exist. Feel free to contribute!
