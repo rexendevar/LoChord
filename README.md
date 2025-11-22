@@ -23,6 +23,9 @@ use AntiMicroX and bind the guide button to F13 (no there is NOT an easier way)
 
 install python modules `ctypes` `threading` `python-rtmidi` `numpy` and `atexit`. then run the script
 
+# Setup (MacOS)
+do it yourself you idiot i'm four hours in and havent gotten the usb to work in the vm yet. no mac os support from me. sorry
+
 ## Joystick
 The joystick is set up exactly like on the HiChord. Go look at a photo to see the arrangement.
 
