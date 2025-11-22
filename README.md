@@ -24,7 +24,7 @@ use AntiMicroX and bind the guide button to F13 (no there is NOT an easier way)
 install python modules `ctypes` `threading` `python-rtmidi` `numpy` and `atexit`. then run the script
 
 # Setup (MacOS)
-do it yourself you idiot i'm four hours in and havent gotten the usb to work in the vm yet. no mac os support from me. sorry
+Doesn't exist. Feel free to contribute!
 
 ## Joystick
 The joystick is set up exactly like on the HiChord. Go look at a photo to see the arrangement.
@@ -41,12 +41,26 @@ LoChord's save slots store:
 You can load the default state (middle C major) by holding Start and pressing Select.
 
 ## Strum Mode
-LoChord's strum mode lays out each note of the current chord along the travel of the right trigger. This allows you to strum the notes in a more natural and human way.
+LoChord's strum mode lays out each note of the current chord along the travel of the right trigger. This allows you to strum the notes in a more natural and human way. Only works with analog triggers.
 
-Readme is a work in progress. Use the main button + right trigger to toggle strum mode, then hold down a chord button and press right trigger in and out to strum. Only works with analog triggers.
+Readme is a work in progress. Use the main button + right trigger to toggle strum mode, then hold down a chord button and press right trigger in and out to strum. Fully press and release the trigger (with no chord button pressed) to manually stop all notes. 
 
-## other stuff
+Switching chords can take a little practice!
+- To STOP the current chord before the next one, press the next chord's button and THEN release the current chord button.
+- To CONTINUE the current chord legato-style, release the current chord's button and then press the next chord's button. The current chord will stop when the next strum begins.
 
+Strum mode is subject to:
+- STRUM_WEIGHT - Makes notes louder at one end of the strum. By default notes at the end will be slightly louder, which is kind of guitar-like I think.
+- VELOCITY_SENSITIVITY - It's nonlinear.
+- Note-safe mode - On by default, toggled with `load` + right trigger. Sends note-offs before note-ons instead of letting note-ons possibly pile up. Certain samplers (Ample Sound mainly) sound better if you disable this but BEWARE!
+
+## Lead mode
+Lead mode turns a chord into only one note. Useful for bass - might be useful for soloing if you can figure out the technique? Toggle it with `save` + right trigger. Compatible with strum mode but NOT compatible with bass or guitar mode.
+
+## Bass and guitar mode
+Bass mode adds an extra note below the fundamental. Guitar mode adds notes to each chord so there's 5 per chord (plus bass if it's on). Toggle these with `main` + dpad left and right respectively.
+
+## Transposing and inverting
 D-pad up and down changes the octave, either of the whole scale or of whichever chords are actively held down. D-pad up/down + main button switches the primary scale between major & minor.
 
 D-pad left & right changes the key a semitone at a time. D-pad l/r + main button resets to middle C.
@@ -61,7 +75,7 @@ VERY VERY early version here. Still want to do
 - lead mode
 - configurable larger chords e.g. 2 octaves of a triad stacked, bass note etc
 - rewrite it all with a class so i'm not misusing global vars so badly DONE
-- windows version LOOKS LIKE ITLL BE A PAIN IN THE ASS
+- windows version DONE but it sucks a bit
 - put it in a ras pi for my dawless setup
 - integrate my new evil features better
 - ill think of more
